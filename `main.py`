@@ -1,0 +1,366 @@
+import telebot
+from telebot import types
+import os
+from datetime import datetime
+import threading
+import time
+
+# Получаем токен из переменной окружения
+TOKEN = os.environ.get('BOT_TOKEN')
+
+if not TOKEN:
+    print("Ошибка: Не найден токен бота!")
+    exit()
+
+bot = telebot.TeleBot(TOKEN)
+
+# Данные расписания для МГУ юрфака
+schedule_data = {
+    'понедельник': [
+        {'time': '9:00-10:30', 'subject': 'Конституционное право', 'professor': 'проф. Иванов А.И.', 'room': 'ауд. 826'},
+        {'time': '10:40-12:10', 'subject': 'История государства и права', 'professor': 'доц. Петров В.С.', 'room': 'ауд. 523'},
+        {'time': '12:20-13:50', 'subject': 'Логика', 'professor': 'доц. Сидоров М.П.', 'room': 'ауд. 301'}
+    ],
+    'вторник': [
+        {'time': '9:00-10:30', 'subject': 'Гражданское право', 'professor': 'проф. Козлов Н.В.', 'room': 'ауд. 745'},
+        {'time': '10:40-12:10', 'subject': 'Латинский язык', 'professor': 'ст. преп. Морозова Е.А.', 'room': 'ауд. 425'},
+        {'time': '14:00-15:30', 'subject': 'Теория государства и права', 'professor': 'проф. Волков И.И.', 'room': 'ауд. 623'}
+    ],
+    'среда': [
+        {'time': '9:00-10:30', 'subject': 'Административное право', 'professor': 'доц. Орлова С.В.', 'room': 'ауд. 512'},
+        {'time': '12:20-13:50', 'subject': 'Конституционное право', 'professor': 'проф. Иванов А.И.', 'room': 'ауд. 826'}
+    ],
+    'четверг': [
+        {'time': '10:40-12:10', 'subject': 'История государства и права', 'professor': 'доц. Петров В.С.', 'room': 'ауд. 523'},
+        {'time': '12:20-13:50', 'subject': 'Гражданское право', 'professor': 'проф. Козлов Н.В.', 'room': 'ауд. 745'},
+        {'time': '14:00-15:30', 'subject': 'Правовая информатика', 'professor': 'ст. преп. Белова А.М.', 'room': 'комп. класс'}
+    ],
+    'пятница': [
+        {'time': '9:00-10:30', 'subject': 'Теория государства и права', 'professor': 'проф. Волков И.И.', 'room': 'ауд. 623'},
+        {'time': '10:40-12:10', 'subject': 'Латинский язык', 'professor': 'ст. преп. Морозова Е.А.', 'room': 'ауд. 425'}
+    ]
+}
+
+# Пример домашних заданий
+sample_assignments = [
+    {'id': 1, 'subject': 'Конституционное право', 'title': 'Эссе "Принципы конституционного строя РФ"', 'deadline': '25.09.2025'},
+    {'id': 2, 'subject': 'История государства и права', 'title': 'Реферат "Русская Правда"', 'deadline': '30.09.2025'},
+    {'id': 3, 'subject': 'Гражданское право', 'title': 'Решение задач по темам 1-3', 'deadline': '22.09.2025'}
+]
+
+user_data = {}
+
+def create_main_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn1 = types.InlineKeyboardButton('📅 Расписание', callback_data='schedule')
+    btn2 = types.InlineKeyboardButton('📚 Домашние задания', callback_data='assignments')
+    btn3 = types.InlineKeyboardButton('🔔 Уведомления', callback_data='notifications')
+    btn4 = types.InlineKeyboardButton('⚙️ Настройки', callback_data='settings')
+    btn5 = types.InlineKeyboardButton('ℹ️ О боте', callback_data='about')
+    markup.add(btn1, btn2)
+    markup.add(btn3, btn4)
+    markup.add(btn5)
+    return markup
+
+def create_schedule_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn1 = types.InlineKeyboardButton('📅 Сегодня', callback_data='today')
+    btn2 = types.InlineKeyboardButton('📅 Завтра', callback_data='tomorrow')
+    btn3 = types.InlineKeyboardButton('📅 Неделя', callback_data='week')
+    btn4 = types.InlineKeyboardButton('👨‍🏫 По преподавателю', callback_data='by_teacher')
+    btn5 = types.InlineKeyboardButton('⬅️ Назад', callback_data='main')
+    markup.add(btn1, btn2)
+    markup.add(btn3, btn4)
+    markup.add(btn5)
+    return markup
+
+def create_assignments_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn1 = types.InlineKeyboardButton('📋 Активные', callback_data='active_assignments')
+    btn2 = types.InlineKeyboardButton('✅ Выполненные', callback_data='completed_assignments')
+    btn3 = types.InlineKeyboardButton('➕ Добавить', callback_data='add_assignment')
+    btn4 = types.InlineKeyboardButton('⬅️ Назад', callback_data='main')
+    markup.add(btn1, btn2)
+    markup.add(btn3)
+    markup.add(btn4)
+    return markup
+
+@bot.message_handler(commands=['start'])
+def start_message(message):
+    user_id = message.from_user.id
+    user_data[user_id] = {'group': '101', 'course': 1}
+    
+    welcome_text = f"🎓 Привет, {message.from_user.first_name}!\n\n"
+    welcome_text += "Я твой помощник по учебе на юридическом факультете МГУ им. М.В. Ломоносова!\n\n"
+    welcome_text += "Помогу тебе с:\n"
+    welcome_text += "📅 Расписанием занятий\n"
+    welcome_text += "📚 Домашними заданиями\n"
+    welcome_text += "🔔 Напоминаниями о парах\n"
+    welcome_text += "⚙️ Настройками профиля\n\n"
+    welcome_text += "Выбери нужную функцию в меню ниже 👇"
+    
+    bot.send_message(message.chat.id, welcome_text, reply_markup=create_main_menu())
+
+@bot.message_handler(commands=['help'])
+def help_message(message):
+    help_text = """
+🤖 **Помощь по боту:**
+
+📅 **Расписание:**
+• Расписание на сегодня/завтра
+• Расписание на всю неделю
+• Поиск по преподавателю
+
+📚 **Домашние задания:**
+• Просмотр активных заданий
+• Добавление новых заданий
+• Отметка о выполнении
+
+🔔 **Уведомления:**
+• Напоминания о парах
+• Напоминания о дедлайнах
+• Настройка времени уведомлений
+
+⚙️ **Настройки:**
+• Указание группы
+• Выбор курса
+• Персональные предпочтения
+
+❓ **Команды:**
+/start - Запустить бота
+/help - Эта справка
+/schedule - Быстрый доступ к расписанию
+    """
+    bot.send_message(message.chat.id, help_text, parse_mode='Markdown')
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    try:
+        if call.data == 'main':
+            bot.edit_message_text(
+                "🎓 Главное меню\nВыбери нужную функцию:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=create_main_menu()
+            )
+        
+        elif call.data == 'schedule':
+            bot.edit_message_text(
+                "📅 **Расписание занятий**\n\nВыбери период для просмотра:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=create_schedule_menu(),
+                parse_mode='Markdown'
+            )
+        
+        elif call.data == 'today':
+            show_schedule_for_day(call, 'сегодня')
+        
+        elif call.data == 'tomorrow':
+            show_schedule_for_day(call, 'завтра')
+        
+        elif call.data == 'week':
+            show_week_schedule(call)
+        
+        elif call.data == 'assignments':
+            bot.edit_message_text(
+                "📚 **Домашние задания**\n\nВыбери действие:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=create_assignments_menu(),
+                parse_mode='Markdown'
+            )
+        
+        elif call.data == 'active_assignments':
+            show_assignments(call)
+        
+        elif call.data == 'notifications':
+            show_notifications_menu(call)
+        
+        elif call.data == 'settings':
+            show_settings_menu(call)
+        
+        elif call.data == 'about':
+            show_about(call)
+            
+    except Exception as e:
+        print(f"Ошибка в callback: {e}")
+        bot.answer_callback_query(call.id, "Произошла ошибка, попробуйте еще раз")
+
+def show_schedule_for_day(call, day_type):
+    today_num = datetime.now().weekday()
+    day_names = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье']
+    
+    if day_type == 'завтра':
+        target_day = day_names[(today_num + 1) % 7]
+    else:
+        target_day = day_names[today_num]
+    
+    if target_day in schedule_data and today_num < 5:  # Будни
+        schedule_text = f"📅 **Расписание на {day_type} ({target_day}):**\n\n"
+        for lesson in schedule_data[target_day]:
+            schedule_text += f"🕐 **{lesson['time']}**\n"
+            schedule_text += f"📖 {lesson['subject']}\n"
+            schedule_text += f"👨‍🏫 {lesson['professor']}\n"
+            schedule_text += f"🏢 {lesson['room']}\n\n"
+    else:
+        schedule_text = f"📅 На {day_type} занятий нет! 🎉\n\nМожно отдохнуть или заняться домашними заданиями 📚"
+    
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton('⬅️ Назад к расписанию', callback_data='schedule')
+    markup.add(btn)
+    
+    bot.edit_message_text(
+        schedule_text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+def show_week_schedule(call):
+    schedule_text = "📅 **Расписание на неделю:**\n\n"
+    
+    for day, lessons in schedule_data.items():
+        schedule_text += f"**{day.upper()}:**\n"
+        if lessons:
+            for lesson in lessons:
+                schedule_text += f"• {lesson['time']} - {lesson['subject']}\n"
+        else:
+            schedule_text += "• Занятий нет\n"
+        schedule_text += "\n"
+    
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton('⬅️ Назад к расписанию', callback_data='schedule')
+    markup.add(btn)
+    
+    bot.edit_message_text(
+        schedule_text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+def show_assignments(call):
+    assignments_text = "📚 **Активные домашние задания:**\n\n"
+    
+    for assignment in sample_assignments:
+        assignments_text += f"📖 **{assignment['subject']}**\n"
+        assignments_text += f"📝 {assignment['title']}\n"
+        assignments_text += f"📅 Сдать до: {assignment['deadline']}\n\n"
+    
+    assignments_text += "💡 _Для добавления нового задания используйте кнопку 'Добавить'_"
+    
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton('⬅️ Назад к заданиям', callback_data='assignments')
+    markup.add(btn)
+    
+    bot.edit_message_text(
+        assignments_text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+def show_notifications_menu(call):
+    notifications_text = "🔔 **Настройки уведомлений:**\n\n"
+    notifications_text += "✅ Напоминания о парах: Включены\n"
+    notifications_text += "✅ Напоминания о дедлайнах: Включены\n"
+    notifications_text += "⏰ Напоминать за: 30 минут\n"
+    notifications_text += "📱 Уведомления о новостях: Включены\n\n"
+    notifications_text += "_Настройки можно изменить в разделе 'Настройки'_"
+    
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton('⬅️ Назад в меню', callback_data='main')
+    markup.add(btn)
+    
+    bot.edit_message_text(
+        notifications_text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+def show_settings_menu(call):
+    user_id = call.from_user.id
+    user_info = user_data.get(user_id, {'group': '101', 'course': 1})
+    
+    settings_text = "⚙️ **Настройки профиля:**\n\n"
+    settings_text += f"👤 Имя: {call.from_user.first_name}\n"
+    settings_text += f"🎓 Факультет: Юридический МГУ\n"
+    settings_text += f"📊 Курс: {user_info['course']}\n"
+    settings_text += f"👥 Группа: {user_info['group']}\n\n"
+    settings_text += "🔔 Уведомления: Включены\n"
+    settings_text += "⏰ Напоминать за: 30 мин до пары\n\n"
+    settings_text += "_Для изменения настроек напишите администратору_"
+    
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton('⬅️ Назад в меню', callback_data='main')
+    markup.add(btn)
+    
+    bot.edit_message_text(
+        settings_text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+def show_about(call):
+    about_text = """
+ℹ️ **О боте:**
+
+🎓 **МГУ Юрфак Помощник** - твой персональный ассистент для учебы на юридическом факультете МГУ им. М.В. Ломоносова.
+
+**Возможности:**
+📅 Актуальное расписание занятий
+📚 Управление домашними заданиями
+🔔 Умные напоминания
+👨‍🏫 Поиск по преподавателям
+⚙️ Персональные настройки
+
+**Версия:** 1.0.0
+**Разработано для:** Студентов юрфака МГУ
+**Поддержка:** @admin (замените на ваш контакт)
+
+💡 _Бот поможет тебе не пропустить важные пары и дедлайны, а также всегда быть в курсе учебных событий!_
+
+🚀 **Удачной учебы!**
+    """
+    
+    markup = types.InlineKeyboardMarkup()
+    btn = types.InlineKeyboardButton('⬅️ Назад в меню', callback_data='main')
+    markup.add(btn)
+    
+    bot.edit_message_text(
+        about_text,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+# Функция для поддержания бота в активном состоянии
+def keep_alive():
+    while True:
+        time.sleep(300)  # Спим 5 минут
+        print("Бот активен:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+if __name__ == '__main__':
+    print("🚀 Бот запущен успешно!")
+    print(f"⏰ Время запуска: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Запускаем поток для поддержания активности
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
+    
+    # Запускаем бота
+    try:
+        bot.polling(none_stop=True, interval=0, timeout=60)
+    except Exception as e:
+        print(f"Ошибка: {e}")
+        time.sleep(5)
+        bot.polling(none_stop=True)
